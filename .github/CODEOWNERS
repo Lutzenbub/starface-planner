@@ -1,0 +1,7 @@
+# Default owner for all files
+* @Lutzenbub
+
+# Core application areas
+/frontend/ @Lutzenbub
+/backend/ @Lutzenbub
+/.github/ @Lutzenbub

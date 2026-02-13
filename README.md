@@ -60,6 +60,18 @@ Fuehrt Backend-Integrationstests und Frontend+Backend-Integrationstests aus:
 npm test
 ```
 
+## CI und Deployment
+
+- CI-Workflow: `.github/workflows/ci.yml`
+  - laeuft bei Push/PR auf `main`
+  - fuehrt `npm test` und `npm run build` aus
+- Frontend-Deployment-Workflow: `.github/workflows/deploy-frontend.yml`
+  - deployed `frontend/dist` auf GitHub Pages
+  - Trigger: Push auf `main` bei Frontend-Aenderungen oder manuell per `workflow_dispatch`
+
+Hinweis fuer private Repositories:
+- GitHub Pages muss in den Repo-Settings unter `Pages` auf `GitHub Actions` als Source gesetzt sein.
+
 ## API
 
 - `GET /api/modules`

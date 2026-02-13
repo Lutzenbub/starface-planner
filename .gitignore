@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+.auth/
+backend/.auth/
+backend/DEBUG/
+backend/data/instances/
 
 # Editor directories and files
 .vscode/*

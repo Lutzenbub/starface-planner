@@ -13,10 +13,19 @@ import { Button } from './components/Button';
 import { Modal } from './components/Modal';
 import { ModuleForm } from './components/ModuleForm';
 import { TimelineBlock } from './components/TimelineBlock';
-import { Menu, Download, Upload, Plus, ChevronLeft, ChevronRight, Edit2, AlertOctagon, Copy, Trash2 } from 'lucide-react';
+import { Menu, Download, Upload, Plus, ChevronLeft, ChevronRight, Edit2, AlertOctagon, Copy, Trash2, Link2 } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { addDays } from 'date-fns';
-import { loadModulesFromApi, saveModulesToApi } from './api/modulesApi';
+import {
+  createInstance,
+  listInstances,
+  loadInstanceHealth,
+  loadInstanceModules,
+  syncInstance,
+  type InstanceHealth,
+  type InstanceSummary,
+} from './api/modulesApi';
+import { mapNormalizedPayloadToModules } from './api/moduleMapper';
 
 const STORAGE_KEY = 'starface-planner-modules';
 
@@ -25,14 +34,45 @@ const parseDateInput = (value: string): Date => {
   return new Date(year, month - 1, day);
 };
 
+const toInstanceLabel = (instance: InstanceSummary | null): string => {
+  if (!instance) {
+    return 'STARFACE Login';
+  }
+
+  if (instance.displayName?.trim()) {
+    return instance.displayName.trim();
+  }
+
+  try {
+    return new URL(instance.baseUrl).host;
+  } catch {
+    return instance.baseUrl;
+  }
+};
+
 function App() {
   const [modules, setModules] = useState<Module[]>([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [editingModuleId, setEditingModuleId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isSavingToServer, setIsSavingToServer] = useState(false);
-  const [isLoadingFromServer, setIsLoadingFromServer] = useState(false);
+  const [isStarfaceLoginModalOpen, setIsStarfaceLoginModalOpen] = useState(false);
+  const [instances, setInstances] = useState<InstanceSummary[]>([]);
+  const [selectedInstanceId, setSelectedInstanceId] = useState('');
+  const [instanceHealth, setInstanceHealth] = useState<InstanceHealth | null>(null);
+  const [instanceForm, setInstanceForm] = useState({
+    baseUrl: '',
+    username: '',
+    password: '',
+    displayName: '',
+  });
+  const [apiNotice, setApiNotice] = useState<string | null>(null);
+  const [isRegisteringInstance, setIsRegisteringInstance] = useState(false);
+  const [syncingInstanceId, setSyncingInstanceId] = useState<string | null>(null);
+  const [isBrowserOnline, setIsBrowserOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+  const [isBackendOnline, setIsBackendOnline] = useState<boolean | null>(null);
   const timelineContainerRef = useRef<HTMLDivElement>(null);
   const hours = useMemo(() => Array.from({ length: 24 }, (_, i) => i), []);
 
@@ -55,13 +95,121 @@ function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(modules));
   }, [modules]);
 
+  useEffect(() => {
+    const onOnline = () => setIsBrowserOnline(true);
+    const onOffline = () => setIsBrowserOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const checkBackend = async () => {
+      try {
+        const response = await fetch('/api/health');
+        if (disposed) {
+          return;
+        }
+        setIsBackendOnline(response.ok);
+      } catch {
+        if (!disposed) {
+          setIsBackendOnline(false);
+        }
+      }
+    };
+
+    void checkBackend();
+    const interval = window.setInterval(() => {
+      void checkBackend();
+    }, 15000);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  const refreshInstances = async () => {
+    try {
+      const loadedInstances = await listInstances();
+      setInstances(loadedInstances);
+      if (!selectedInstanceId && loadedInstances.length > 0) {
+        setSelectedInstanceId(loadedInstances[0].instanceId);
+      }
+    } catch (error) {
+      console.error(error);
+      setApiNotice('Instanzen konnten nicht geladen werden.');
+    }
+  };
+
+  const refreshSelectedHealth = async (instanceId: string) => {
+    try {
+      const health = await loadInstanceHealth(instanceId);
+      setInstanceHealth(health);
+    } catch {
+      setInstanceHealth(null);
+    }
+  };
+
+  useEffect(() => {
+    void refreshInstances();
+  }, []);
+
+  useEffect(() => {
+    if (!selectedInstanceId) {
+      setInstanceHealth(null);
+      return;
+    }
+
+    void refreshSelectedHealth(selectedInstanceId);
+  }, [selectedInstanceId]);
+
   const conflicts = useMemo(() => detectConflicts(modules, selectedDate), [modules, selectedDate]);
   const sortedModules = useMemo(() => [...modules].sort((a, b) => a.order - b.order), [modules]);
   const sortedActiveModules = useMemo(() => sortedModules.filter((module) => module.active), [sortedModules]);
+  const selectedInstance = useMemo(
+    () => instances.find((instance) => instance.instanceId === selectedInstanceId) ?? null,
+    [instances, selectedInstanceId],
+  );
+  const isStarfaceLoggedIn = Boolean(selectedInstance && instanceHealth?.loginOk);
+  const connectivityOnline = isBrowserOnline && isBackendOnline !== false;
+  const connectivityLabel = connectivityOnline ? 'Online' : 'Offline';
+  const loginButtonStyle: React.CSSProperties = isStarfaceLoggedIn
+    ? {
+        backgroundColor: 'rgba(16, 185, 129, 0.22)',
+        borderColor: '#34d399',
+        color: '#d1fae5',
+      }
+    : {
+        backgroundColor: 'rgba(59, 130, 246, 0.24)',
+        borderColor: '#60a5fa',
+        color: '#dbeafe',
+      };
 
   const closeModal = () => {
     setIsModalOpen(false);
     setEditingModuleId(null);
+  };
+
+  const openStarfaceLoginModal = () => {
+    if (selectedInstance && !instanceForm.baseUrl.trim()) {
+      setInstanceForm((current) => ({
+        ...current,
+        baseUrl: selectedInstance.baseUrl,
+        displayName: selectedInstance.displayName ?? current.displayName,
+      }));
+    }
+    setIsStarfaceLoginModalOpen(true);
+  };
+
+  const closeStarfaceLoginModal = () => {
+    setIsStarfaceLoginModalOpen(false);
+    setInstanceForm((current) => ({ ...current, password: '' }));
   };
 
   const openNewModuleModal = () => {
@@ -179,30 +327,92 @@ function App() {
     event.target.value = '';
   };
 
-  const handleSaveToServer = async () => {
-    setIsSavingToServer(true);
+  const toMessage = (error: unknown): string => (error instanceof Error ? error.message : 'Unbekannter Fehler');
+
+  const handleCreateInstance = async () => {
+    setApiNotice(null);
+
+    if (!instanceForm.baseUrl.trim() || !instanceForm.username.trim() || !instanceForm.password.trim()) {
+      setApiNotice('Bitte Instanz, ID und Passwort ausfuellen.');
+      return;
+    }
+
+    setIsRegisteringInstance(true);
     try {
-      await saveModulesToApi(modules);
-      alert('Module wurden am Server gespeichert.');
+      const created = await createInstance({
+        baseUrl: instanceForm.baseUrl.trim(),
+        username: instanceForm.username.trim(),
+        password: instanceForm.password,
+        displayName: instanceForm.displayName.trim() || undefined,
+      });
+      setSelectedInstanceId(created.instanceId);
+      await refreshInstances();
+      await refreshSelectedHealth(created.instanceId);
+      setApiNotice(`Login erfolgreich: ${created.baseUrl}`);
+      setInstanceForm((current) => ({
+        ...current,
+        baseUrl: created.baseUrl,
+        password: '',
+      }));
+      setIsStarfaceLoginModalOpen(false);
     } catch (error) {
       console.error(error);
-      alert('Speichern am Server fehlgeschlagen.');
+      setApiNotice(`Login fehlgeschlagen: ${toMessage(error)}`);
     } finally {
-      setIsSavingToServer(false);
+      setIsRegisteringInstance(false);
     }
   };
 
-  const handleLoadFromServer = async () => {
-    setIsLoadingFromServer(true);
+  const handleLoadFromStarface = async () => {
+    if (!selectedInstanceId) {
+      setApiNotice('Bitte zuerst ueber STARFACE Login anmelden.');
+      setIsStarfaceLoginModalOpen(true);
+      return;
+    }
+
+    setApiNotice(null);
+    setSyncingInstanceId(selectedInstanceId);
     try {
-      const serverModules = await loadModulesFromApi();
-      setModules(serverModules.map((module, order) => ({ ...module, order: module.order ?? order })));
-      alert('Module vom Server geladen.');
+      const payload = await loadInstanceModules(selectedInstanceId);
+      const mappedModules = mapNormalizedPayloadToModules(payload).map((module, order) => ({
+        ...module,
+        order: module.order ?? order,
+      }));
+      setModules(mappedModules);
+      setApiNotice(`Load from Starface erfolgreich (${payload.modules.length} Module).`);
+      await refreshSelectedHealth(selectedInstanceId);
     } catch (error) {
       console.error(error);
-      alert('Laden vom Server fehlgeschlagen.');
+      setApiNotice(`Load from Starface fehlgeschlagen: ${toMessage(error)}`);
     } finally {
-      setIsLoadingFromServer(false);
+      setSyncingInstanceId(null);
+    }
+  };
+
+  const handleSaveToStarface = async () => {
+    if (!selectedInstanceId) {
+      setApiNotice('Bitte zuerst ueber STARFACE Login anmelden.');
+      setIsStarfaceLoginModalOpen(true);
+      return;
+    }
+
+    setApiNotice(null);
+    setSyncingInstanceId(selectedInstanceId);
+    try {
+      const summary = await syncInstance(selectedInstanceId);
+      const payload = await loadInstanceModules(selectedInstanceId);
+      const mappedModules = mapNormalizedPayloadToModules(payload).map((module, order) => ({
+        ...module,
+        order: module.order ?? order,
+      }));
+      setModules(mappedModules);
+      setApiNotice(`Save to Starface erfolgreich (${summary.modulesCount} Module, ${summary.rulesCount} Regeln).`);
+      await refreshSelectedHealth(selectedInstanceId);
+    } catch (error) {
+      console.error(error);
+      setApiNotice(`Save to Starface fehlgeschlagen: ${toMessage(error)}`);
+    } finally {
+      setSyncingInstanceId(null);
     }
   };
 
@@ -250,7 +460,30 @@ function App() {
           <div className="h-16 px-4 border-b border-gray-800 flex items-center">
             <h1 className="font-title text-lg font-bold text-gray-200">Starface Planner</h1>
           </div>
-          <div className="h-10 border-b border-gray-800 bg-gray-950" />
+          <div className="h-12 px-4 border-b border-gray-800 bg-gray-950 flex items-center">
+            <button
+              onClick={openStarfaceLoginModal}
+              disabled={isRegisteringInstance}
+              className={`w-full h-9 rounded-lg border-2 text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 ${
+                isStarfaceLoggedIn
+                  ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100 shadow-[0_0_16px_rgba(16,185,129,0.35)]'
+                  : 'border-blue-400/60 bg-blue-500/15 text-blue-100 hover:bg-blue-500/25'
+              } disabled:opacity-70`}
+              style={loginButtonStyle}
+              title={isStarfaceLoggedIn ? toInstanceLabel(selectedInstance) : 'Login mit STARFACE Cloud'}
+            >
+              <Link2 size={14} />
+              <span className={`h-2 w-2 rounded-full ${isStarfaceLoggedIn ? 'bg-emerald-300' : 'bg-blue-200'}`} />
+              <span className="truncate">{isRegisteringInstance ? 'Login laeuft...' : toInstanceLabel(isStarfaceLoggedIn ? selectedInstance : null)}</span>
+              <span
+                className={`inline-flex h-2 w-2 rounded-full ${connectivityOnline ? 'bg-emerald-300' : 'bg-red-400'}`}
+                title={connectivityLabel}
+              />
+            </button>
+          </div>
+          <div className="px-4 py-1 border-b border-gray-800 bg-gray-950 text-[10px] text-gray-400">
+            STARFACE Verbindung: <span className={connectivityOnline ? 'text-emerald-300' : 'text-red-300'}>{connectivityLabel}</span>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3 min-w-[320px]">
@@ -265,21 +498,27 @@ function App() {
               </button>
            </div>
            <div className="grid grid-cols-2 gap-2 mb-4">
-              <button
-                onClick={handleSaveToServer}
-                disabled={isSavingToServer}
-                className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg p-2 transition-colors text-xs font-medium disabled:opacity-50"
-              >
-                <Upload size={14} /> Save to Server
-              </button>
-              <button
-                onClick={handleLoadFromServer}
-                disabled={isLoadingFromServer}
-                className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg p-2 transition-colors text-xs font-medium disabled:opacity-50"
-              >
-                <Download size={14} /> Load from Server
-              </button>
+             <button
+               onClick={() => void handleSaveToStarface()}
+               disabled={Boolean(syncingInstanceId) || isRegisteringInstance}
+               className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg p-2 transition-colors text-xs font-medium disabled:opacity-60"
+             >
+               <Upload size={14} /> {syncingInstanceId ? 'Saving...' : 'Save to Starface'}
+             </button>
+             <button
+               onClick={() => void handleLoadFromStarface()}
+               disabled={Boolean(syncingInstanceId) || isRegisteringInstance}
+               className="flex items-center justify-center gap-2 bg-gray-900 hover:bg-gray-800 border border-gray-800 rounded-lg p-2 transition-colors text-xs font-medium disabled:opacity-60"
+             >
+               <Download size={14} /> {syncingInstanceId ? 'Loading...' : 'Load from Starface'}
+             </button>
            </div>
+
+           {apiNotice && (
+             <div className="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-2 text-xs text-gray-300 mb-3">
+               {apiNotice}
+             </div>
+           )}
 
            <Button onClick={openNewModuleModal} className="w-full mb-4">
              <Plus size={16} className="mr-2" /> New Module
@@ -461,6 +700,93 @@ function App() {
           </div>
         </div>
       </div>
+
+      <Modal
+        isOpen={isStarfaceLoginModalOpen}
+        onClose={closeStarfaceLoginModal}
+        title="STARFACE Cloud Login"
+      >
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleCreateInstance();
+          }}
+        >
+          <div>
+            <label className="block text-sm text-gray-300 mb-1" htmlFor="starface-base-url">
+              Instanz
+            </label>
+            <input
+              id="starface-base-url"
+              value={instanceForm.baseUrl}
+              onChange={(event) => setInstanceForm((current) => ({ ...current, baseUrl: event.target.value }))}
+              placeholder="name_der_instanz.starface-cloud.com"
+              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none focus:border-gray-500"
+              autoComplete="url"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-300 mb-1" htmlFor="starface-user-id">
+              ID
+            </label>
+            <input
+              id="starface-user-id"
+              value={instanceForm.username}
+              onChange={(event) => setInstanceForm((current) => ({ ...current, username: event.target.value }))}
+              placeholder="ID"
+              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none focus:border-gray-500"
+              autoComplete="username"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-300 mb-1" htmlFor="starface-password">
+              Passwort
+            </label>
+            <input
+              id="starface-password"
+              type="password"
+              value={instanceForm.password}
+              onChange={(event) => setInstanceForm((current) => ({ ...current, password: event.target.value }))}
+              placeholder="Passwort"
+              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none focus:border-gray-500"
+              autoComplete="current-password"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-300 mb-1" htmlFor="starface-display-name">
+              Anzeigename (optional)
+            </label>
+            <input
+              id="starface-display-name"
+              value={instanceForm.displayName}
+              onChange={(event) => setInstanceForm((current) => ({ ...current, displayName: event.target.value }))}
+              placeholder="z. B. Kunde Nord"
+              className="w-full rounded-lg border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 outline-none focus:border-gray-500"
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={closeStarfaceLoginModal}
+              className="rounded-lg border border-gray-700 bg-gray-900 px-4 py-2 text-sm text-gray-200 hover:bg-gray-800 transition-colors"
+            >
+              Abbrechen
+            </button>
+            <button
+              type="submit"
+              disabled={isRegisteringInstance}
+              className="rounded-lg border border-primary-600 bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-500 transition-colors disabled:opacity-70"
+            >
+              {isRegisteringInstance ? 'Login...' : 'Login'}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Modal */}
       <Modal 

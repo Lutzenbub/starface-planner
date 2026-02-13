@@ -1,0 +1,5 @@
+{
+  "name": "Starface Planner",
+  "description": "Professional visualization tool for Starface routing logic with conflict detection, drag-and-drop planning, and JSON export.",
+  "requestFramePermissions": []
+}

@@ -359,12 +359,15 @@ function App() {
           </div>
 
           <div className="flex items-center gap-4">
-             {conflicts.length > 0 && (
-               <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-800 rounded-full text-yellow-500 text-xs font-medium animate-pulse">
-                 <AlertOctagon size={14} />
-                 <span>{conflicts.length} Conflict{conflicts.length > 1 ? 's' : ''} Detected</span>
-               </div>
-             )}
+            {conflicts.length > 0 && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-900/30 border border-yellow-800 rounded-full text-yellow-500 text-xs font-medium animate-pulse">
+                <AlertOctagon size={14} />
+                <span>{conflicts.length} Conflict{conflicts.length > 1 ? 's' : ''} Detected</span>
+              </div>
+            )}
+            <div className="text-sm sm:text-base text-gray-200 whitespace-nowrap">
+              <span className="font-bold">antony IT</span> Starface Planner
+            </div>
           </div>
         </div>
 
@@ -386,7 +389,7 @@ function App() {
           </div>
 
           {/* Grid */}
-          <div className="min-w-[1200px] flex-1 relative bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-opacity-5" ref={timelineContainerRef}>
+          <div className="min-w-[1200px] flex-1 relative bg-gray-950" ref={timelineContainerRef}>
              
              {/* Background Grid Lines */}
              <div className="absolute inset-0 flex pl-48 pointer-events-none">

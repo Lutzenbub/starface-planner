@@ -38,7 +38,7 @@ jobs:
         run: npm ci
 
       - name: Build frontend
-        run: npm run build --workspace frontend
+        run: npm run build --workspace frontend -- --base=/${{ github.event.repository.name }}/
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

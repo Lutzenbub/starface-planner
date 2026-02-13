@@ -246,8 +246,11 @@ function App() {
       
       {/* --- Sidebar --- */}
       <div className={`flex flex-col bg-gray-950 border-r border-gray-800 transition-all duration-300 ${isSidebarOpen ? 'w-80' : 'w-0'} overflow-hidden`}>
-        <div className="p-4 border-b border-gray-800 flex items-center justify-between min-w-[320px]">
-          <h1 className="text-xl font-bold bg-gradient-to-r from-primary-500 to-blue-300 bg-clip-text text-transparent">Starface Planner</h1>
+        <div className="min-w-[320px]">
+          <div className="h-16 px-4 border-b border-gray-800 flex items-center">
+            <h1 className="font-title text-lg font-bold text-gray-200">Starface Planner</h1>
+          </div>
+          <div className="h-10 border-b border-gray-800 bg-gray-950" />
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-3 min-w-[320px]">

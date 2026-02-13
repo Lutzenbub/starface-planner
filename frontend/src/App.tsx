@@ -365,7 +365,7 @@ function App() {
                 <span>{conflicts.length} Conflict{conflicts.length > 1 ? 's' : ''} Detected</span>
               </div>
             )}
-            <div className="text-sm sm:text-base text-gray-200 whitespace-nowrap">
+            <div className="font-title text-sm sm:text-base text-gray-200 whitespace-nowrap">
               <span className="font-bold">antony IT</span> Starface Planner
             </div>
           </div>

@@ -5,7 +5,10 @@ export const resolveApiBaseUrl = (apiBaseUrl?: string): string => {
   return removeTrailingSlash(raw);
 };
 
-const diagnosticsEnabled = import.meta.env.DEV || import.meta.env.VITE_DEBUG_API === 'true';
+const diagnosticsEnabled =
+  import.meta.env.DEV ||
+  import.meta.env.VITE_DEBUG_API === 'true' ||
+  (typeof window !== 'undefined' && window.location.hostname.endsWith('github.io'));
 
 const createRequestId = (): string =>
   `api-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;

@@ -2,6 +2,7 @@ import { AppError, toAppError } from '../errors.js';
 import type { InstanceStore } from '../stores/instanceStore.js';
 import type { SyncResultStore } from '../stores/syncResultStore.js';
 import type { StarfaceAutomation, StarfaceInstanceRecord, SyncSummary } from '../types.js';
+import type pino from 'pino';
 
 export interface SyncServiceOptions {
   automation: StarfaceAutomation;
@@ -9,6 +10,7 @@ export interface SyncServiceOptions {
   syncResultStore: SyncResultStore;
   syncTimeoutMs: number;
   syncCooldownMs: number;
+  logger?: pino.Logger;
 }
 
 const countRules = (payload: { modules: Array<{ rules: unknown[] }> }): number =>
@@ -39,8 +41,23 @@ export class SyncService {
   public constructor(private readonly options: SyncServiceOptions) {}
 
   public async verifyInstanceLogin(instance: StarfaceInstanceRecord): Promise<void> {
+    this.options.logger?.info(
+      {
+        instanceId: instance.instanceId,
+        baseUrl: instance.baseUrl,
+      },
+      'Starting STARFACE login verification',
+    );
+
     await this.options.automation.verifyLogin(instance);
     this.options.instanceStore.markLogin(instance.instanceId, true);
+
+    this.options.logger?.info(
+      {
+        instanceId: instance.instanceId,
+      },
+      'STARFACE login verification successful',
+    );
   }
 
   public async syncInstance(instance: StarfaceInstanceRecord): Promise<SyncSummary> {
@@ -63,6 +80,15 @@ export class SyncService {
     this.lastSyncStartedAt.set(instance.instanceId, now);
 
     try {
+      const startedAt = Date.now();
+      this.options.logger?.info(
+        {
+          instanceId: instance.instanceId,
+          baseUrl: instance.baseUrl,
+        },
+        'Starting STARFACE sync',
+      );
+
       const payload = await withTimeout(
         this.options.automation.scrapeModules(instance),
         this.options.syncTimeoutMs,
@@ -71,6 +97,18 @@ export class SyncService {
 
       await this.options.syncResultStore.save(payload);
       this.options.instanceStore.markSyncSuccess(instance.instanceId, payload.fetchedAt);
+
+      const durationMs = Date.now() - startedAt;
+      this.options.logger?.info(
+        {
+          instanceId: instance.instanceId,
+          durationMs,
+          modulesCount: payload.modules.length,
+          rulesCount: countRules(payload),
+          warningsCount: payload.warnings.length,
+        },
+        'STARFACE sync successful',
+      );
 
       return {
         instanceId: instance.instanceId,
@@ -82,6 +120,15 @@ export class SyncService {
     } catch (error) {
       const mapped = toAppError(error);
       this.options.instanceStore.markSyncFailure(instance.instanceId, mapped.code, mapped.message);
+      this.options.logger?.error(
+        {
+          instanceId: instance.instanceId,
+          errorCode: mapped.code,
+          errorMessage: mapped.message,
+          errorDetails: mapped.details,
+        },
+        'STARFACE sync failed',
+      );
       throw mapped;
     } finally {
       this.runningInstances.delete(instance.instanceId);

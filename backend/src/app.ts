@@ -56,6 +56,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
       syncResultStore,
       syncCooldownMs: config.syncCooldownMs,
       syncTimeoutMs: config.syncTimeoutMs,
+      logger,
     });
 
   ensureRuntimeDirectories(config).catch((error) => {
@@ -115,6 +116,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
   });
 
   app.get('/api/csrf', (_req, res) => {
+    logger.info('CSRF token requested');
     res.json({
       csrfToken: config.csrfToken,
     });
@@ -133,6 +135,14 @@ export const createApp = (options: CreateAppOptions = {}) => {
     asyncHandler(async (req, res) => {
       const parsed = createInstanceInputSchema.parse(req.body);
       const baseUrl = normalizeStarfaceBaseUrl(parsed.baseUrl);
+      logger.info(
+        {
+          baseUrl,
+          displayName: parsed.displayName,
+          usernameLength: parsed.username.length,
+        },
+        'Create instance requested',
+      );
 
       const instance = instanceStore.upsert({
         baseUrl,
@@ -140,8 +150,21 @@ export const createApp = (options: CreateAppOptions = {}) => {
         password: parsed.password,
         displayName: parsed.displayName,
       });
+      logger.info(
+        {
+          instanceId: instance.instanceId,
+          baseUrl: instance.baseUrl,
+        },
+        'Instance stored, starting login verification',
+      );
 
       await syncService.verifyInstanceLogin(instance);
+      logger.info(
+        {
+          instanceId: instance.instanceId,
+        },
+        'Instance login verification done',
+      );
 
       res.status(201).json({
         instanceId: instance.instanceId,
@@ -156,12 +179,22 @@ export const createApp = (options: CreateAppOptions = {}) => {
     '/api/instances/:instanceId/sync',
     asyncHandler(async (req, res) => {
       const { instanceId } = instanceIdParamSchema.parse(req.params);
+      logger.info({ instanceId }, 'Sync requested');
       const instance = instanceStore.getById(instanceId);
       if (!instance) {
         throw new AppError('INSTANCE_NOT_FOUND', 'Instanz nicht gefunden', 404, { instanceId });
       }
 
       const summary = await syncService.syncInstance(instance);
+      logger.info(
+        {
+          instanceId,
+          fetchedAt: summary.fetchedAt,
+          modulesCount: summary.modulesCount,
+          rulesCount: summary.rulesCount,
+        },
+        'Sync completed',
+      );
       res.status(200).json({ summary });
     }),
   );
@@ -170,6 +203,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
     '/api/instances/:instanceId/modules',
     asyncHandler(async (req, res) => {
       const { instanceId } = instanceIdParamSchema.parse(req.params);
+      logger.info({ instanceId }, 'Modules requested');
       const instance = instanceStore.getById(instanceId);
       if (!instance) {
         throw new AppError('INSTANCE_NOT_FOUND', 'Instanz nicht gefunden', 404, { instanceId });
@@ -180,6 +214,15 @@ export const createApp = (options: CreateAppOptions = {}) => {
         throw new AppError('INSTANCE_NOT_FOUND', 'Noch kein Sync-Ergebnis vorhanden', 404, { instanceId });
       }
 
+      logger.info(
+        {
+          instanceId,
+          fetchedAt: payload.fetchedAt,
+          modulesCount: payload.modules.length,
+          warningsCount: payload.warnings.length,
+        },
+        'Modules returned',
+      );
       res.json(payload);
     }),
   );
@@ -188,6 +231,7 @@ export const createApp = (options: CreateAppOptions = {}) => {
     '/api/instances/:instanceId/health',
     asyncHandler(async (req, res) => {
       const { instanceId } = instanceIdParamSchema.parse(req.params);
+      logger.info({ instanceId }, 'Instance health requested');
       const instance = instanceStore.getById(instanceId);
       if (!instance) {
         throw new AppError('INSTANCE_NOT_FOUND', 'Instanz nicht gefunden', 404, { instanceId });

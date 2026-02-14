@@ -19,8 +19,10 @@ import { addDays } from 'date-fns';
 import {
   createInstance,
   listInstances,
+  loadApiHealth,
   loadInstanceHealth,
   loadInstanceModules,
+  resolveApiBaseUrl,
   syncInstance,
   type InstanceHealth,
   type InstanceSummary,
@@ -111,14 +113,28 @@ function App() {
 
     const checkBackend = async () => {
       try {
-        const response = await fetch('/api/health');
+        const payload = await loadApiHealth();
         if (disposed) {
           return;
         }
-        setIsBackendOnline(response.ok);
-      } catch {
+        setIsBackendOnline(payload.ok);
+        if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_API === 'true') {
+          console.info('[starface-ui] backend health ok', {
+            apiBaseUrl: resolveApiBaseUrl(),
+            service: payload.service,
+            timestamp: payload.timestamp,
+          });
+        }
+      } catch (error) {
         if (!disposed) {
           setIsBackendOnline(false);
+          if (import.meta.env.DEV || import.meta.env.VITE_DEBUG_API === 'true') {
+            console.warn('[starface-ui] backend health failed', {
+              apiBaseUrl: resolveApiBaseUrl(),
+              origin: window.location.origin,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
         }
       }
     };
@@ -338,6 +354,14 @@ function App() {
     }
 
     setIsRegisteringInstance(true);
+    const start = performance.now();
+    console.info('[starface-ui] login attempt started', {
+      apiBaseUrl: resolveApiBaseUrl(),
+      baseUrl: instanceForm.baseUrl.trim(),
+      usernameLength: instanceForm.username.trim().length,
+      hasPassword: Boolean(instanceForm.password),
+      origin: window.location.origin,
+    });
     try {
       const created = await createInstance({
         baseUrl: instanceForm.baseUrl.trim(),
@@ -355,9 +379,20 @@ function App() {
         password: '',
       }));
       setIsStarfaceLoginModalOpen(false);
+      console.info('[starface-ui] login attempt success', {
+        instanceId: created.instanceId,
+        normalizedBaseUrl: created.baseUrl,
+        durationMs: Math.round(performance.now() - start),
+      });
     } catch (error) {
       console.error(error);
       setApiNotice(`Login fehlgeschlagen: ${toMessage(error)}`);
+      console.error('[starface-ui] login attempt failed', {
+        apiBaseUrl: resolveApiBaseUrl(),
+        inputBaseUrl: instanceForm.baseUrl.trim(),
+        durationMs: Math.round(performance.now() - start),
+        error: toMessage(error),
+      });
     } finally {
       setIsRegisteringInstance(false);
     }

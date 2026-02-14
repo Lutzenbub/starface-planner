@@ -1,22 +1,104 @@
 const removeTrailingSlash = (value: string): string => value.replace(/\/+$/, '');
 
-const resolveApiBaseUrl = (apiBaseUrl?: string): string => {
+export const resolveApiBaseUrl = (apiBaseUrl?: string): string => {
   const raw = apiBaseUrl ?? import.meta.env.VITE_API_BASE_URL ?? '';
   return removeTrailingSlash(raw);
 };
 
-const apiPath = (path: string, apiBaseUrl?: string): string => `${resolveApiBaseUrl(apiBaseUrl)}${path}`;
+const diagnosticsEnabled = import.meta.env.DEV || import.meta.env.VITE_DEBUG_API === 'true';
+
+const createRequestId = (): string =>
+  `api-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+const logApi = (
+  level: 'info' | 'warn' | 'error',
+  message: string,
+  metadata: Record<string, unknown>,
+): void => {
+  if (!diagnosticsEnabled) {
+    return;
+  }
+
+  const prefix = '[starface-api]';
+  if (level === 'error') {
+    console.error(prefix, message, metadata);
+    return;
+  }
+
+  if (level === 'warn') {
+    console.warn(prefix, message, metadata);
+    return;
+  }
+
+  console.info(prefix, message, metadata);
+};
+
+let warnedAboutGithubPagesOrigin = false;
+
+const apiPath = (path: string, apiBaseUrl?: string): string => {
+  const base = resolveApiBaseUrl(apiBaseUrl);
+  if (
+    !base &&
+    !warnedAboutGithubPagesOrigin &&
+    typeof window !== 'undefined' &&
+    window.location.hostname.endsWith('github.io')
+  ) {
+    warnedAboutGithubPagesOrigin = true;
+    logApi('warn', 'No VITE_API_BASE_URL configured on github.io host', {
+      hostname: window.location.hostname,
+      origin: window.location.origin,
+      hint: 'Set repository variable VITE_API_BASE_URL to your deployed backend URL.',
+    });
+  }
+  return `${base}${path}`;
+};
 
 const csrfTokenCache = new Map<string, string>();
 
 const getCsrfToken = async (apiBaseUrl?: string): Promise<string> => {
   const base = resolveApiBaseUrl(apiBaseUrl);
   if (csrfTokenCache.has(base)) {
+    logApi('info', 'Using cached CSRF token', { base });
     return csrfTokenCache.get(base) as string;
   }
 
-  const response = await fetch(apiPath('/api/csrf', apiBaseUrl));
+  const requestId = createRequestId();
+  const url = apiPath('/api/csrf', apiBaseUrl);
+  const startedAt = performance.now();
+  logApi('info', 'Fetching CSRF token', { requestId, url, base });
+
+  let response: Response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    logApi('error', 'CSRF request failed before response', {
+      requestId,
+      url,
+      durationMs: Math.round(performance.now() - startedAt),
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
+  const durationMs = Math.round(performance.now() - startedAt);
+  logApi('info', 'CSRF response received', {
+    requestId,
+    status: response.status,
+    ok: response.ok,
+    durationMs,
+  });
+
   if (!response.ok) {
+    if (
+      response.status === 404 &&
+      typeof window !== 'undefined' &&
+      window.location.hostname.endsWith('github.io') &&
+      !resolveApiBaseUrl(apiBaseUrl)
+    ) {
+      throw new Error(
+        'CSRF endpoint not found (404). GitHub Pages has no backend. Configure VITE_API_BASE_URL to your deployed backend.',
+      );
+    }
     throw new Error(`CSRF token request failed with status ${response.status}`);
   }
 
@@ -48,6 +130,11 @@ const jsonRequest = async <T>(
   requiresCsrf = false,
   apiBaseUrl?: string,
 ): Promise<T> => {
+  const requestId = createRequestId();
+  const url = apiPath(path, apiBaseUrl);
+  const method = options.method ?? 'GET';
+  const startedAt = performance.now();
+
   const headers = new Headers(options.headers ?? {});
   headers.set('Accept', 'application/json');
 
@@ -55,21 +142,70 @@ const jsonRequest = async <T>(
     headers.set('Content-Type', 'application/json');
   }
 
+  logApi('info', 'API request started', {
+    requestId,
+    method,
+    url,
+    requiresCsrf,
+  });
+
   if (requiresCsrf) {
     headers.set('x-csrf-token', await getCsrfToken(apiBaseUrl));
   }
 
-  const response = await fetch(apiPath(path, apiBaseUrl), {
-    ...options,
-    headers,
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      headers,
+    });
+  } catch (error) {
+    const durationMs = Math.round(performance.now() - startedAt);
+    logApi('error', 'API request failed before response', {
+      requestId,
+      method,
+      url,
+      durationMs,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+
+  const durationMs = Math.round(performance.now() - startedAt);
+  logApi('info', 'API response received', {
+    requestId,
+    method,
+    url,
+    status: response.status,
+    ok: response.ok,
+    durationMs,
   });
 
   if (!response.ok) {
+    if (
+      response.status === 404 &&
+      typeof window !== 'undefined' &&
+      window.location.hostname.endsWith('github.io') &&
+      !resolveApiBaseUrl(apiBaseUrl)
+    ) {
+      throw new Error(
+        `API endpoint ${path} not found (404). GitHub Pages hosts frontend only. Configure VITE_API_BASE_URL.`,
+      );
+    }
     throw new Error(await parseApiError(response));
   }
 
   return (await response.json()) as T;
 };
+
+export interface ApiHealthPayload {
+  ok: boolean;
+  service: string;
+  timestamp: string;
+}
+
+export const loadApiHealth = async (apiBaseUrl?: string): Promise<ApiHealthPayload> =>
+  jsonRequest<ApiHealthPayload>('/api/health', undefined, false, apiBaseUrl);
 
 export interface InstanceSummary {
   instanceId: string;

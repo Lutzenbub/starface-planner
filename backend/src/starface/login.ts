@@ -147,6 +147,12 @@ const reuseStorageState = async (
   options: LoginToStarfaceOptions,
 ): Promise<{ context: BrowserContext; page: Page } | null> => {
   if (!(await pathExists(options.instance.storageStatePath))) {
+    options.logger?.info(
+      {
+        instanceId: options.instance.instanceId,
+      },
+      'storageState file not found',
+    );
     return null;
   }
 
@@ -161,10 +167,22 @@ const reuseStorageState = async (
   });
 
   if (await hasLoginForm(page)) {
+    options.logger?.info(
+      {
+        instanceId: options.instance.instanceId,
+      },
+      'storageState invalid (login form still shown)',
+    );
     await context.close();
     return null;
   }
 
+  options.logger?.info(
+    {
+      instanceId: options.instance.instanceId,
+    },
+    'storageState reuse successful',
+  );
   return { context, page };
 };
 
@@ -174,6 +192,7 @@ const runFreshLogin = async (
 ): Promise<{ context: BrowserContext; page: Page; requiredSecondLogin: boolean }> => {
   const context = await browser.newContext();
   const page = await context.newPage();
+  options.logger?.info({ instanceId: options.instance.instanceId }, 'Opening STARFACE base URL');
 
   await page.goto(options.instance.baseUrl, {
     timeout: options.navigationTimeoutMs,
@@ -181,23 +200,29 @@ const runFreshLogin = async (
   });
 
   if (await hasLoginForm(page)) {
+    options.logger?.info({ instanceId: options.instance.instanceId }, 'Submitting first login form');
     await submitLoginForm(
       page,
       options.instance.credentials.username,
       options.instance.credentials.password,
       options.loginTimeoutMs,
     );
+  } else {
+    options.logger?.info({ instanceId: options.instance.instanceId }, 'No first login form detected');
   }
 
+  options.logger?.info({ instanceId: options.instance.instanceId }, 'Waiting for dashboard/admin button');
   await waitForDashboard(page, options.loginTimeoutMs);
   await saveDebugScreenshot(page, options.debugDir, 'login-dashboard.png', options.debug);
 
+  options.logger?.info({ instanceId: options.instance.instanceId }, 'Clicking Administration button');
   await clickAdministration(page, options.navigationTimeoutMs);
   await saveDebugScreenshot(page, options.debugDir, 'admin-config.png', options.debug);
 
   let requiredSecondLogin = false;
   if (await hasLoginForm(page)) {
     requiredSecondLogin = true;
+    options.logger?.info({ instanceId: options.instance.instanceId }, 'Second login form detected, submitting');
     await submitLoginForm(
       page,
       options.instance.credentials.username,
@@ -214,6 +239,8 @@ const runFreshLogin = async (
         502,
       );
     }
+  } else {
+    options.logger?.info({ instanceId: options.instance.instanceId }, 'No second login form detected');
   }
 
   if (await hasLoginForm(page)) {
@@ -224,6 +251,18 @@ const runFreshLogin = async (
 };
 
 export const loginToStarface = async (options: LoginToStarfaceOptions): Promise<LoginSession> => {
+  const startedAt = Date.now();
+  options.logger?.info(
+    {
+      instanceId: options.instance.instanceId,
+      baseUrl: options.instance.baseUrl,
+      storageStatePath: options.instance.storageStatePath,
+      headless: options.headless,
+      debug: options.debug,
+    },
+    'STARFACE login flow started',
+  );
+
   await ensureDirectory(path.dirname(options.instance.storageStatePath));
 
   const browser = await chromium.launch({
@@ -231,8 +270,21 @@ export const loginToStarface = async (options: LoginToStarfaceOptions): Promise<
   });
 
   try {
+    options.logger?.info(
+      {
+        instanceId: options.instance.instanceId,
+      },
+      'Checking storageState reuse',
+    );
     const reused = await reuseStorageState(browser, options);
     if (reused) {
+      options.logger?.info(
+        {
+          instanceId: options.instance.instanceId,
+          durationMs: Date.now() - startedAt,
+        },
+        'STARFACE login flow completed using storageState',
+      );
       return {
         browser,
         context: reused.context,
@@ -243,8 +295,22 @@ export const loginToStarface = async (options: LoginToStarfaceOptions): Promise<
       };
     }
 
+    options.logger?.info(
+      {
+        instanceId: options.instance.instanceId,
+      },
+      'No valid storageState found, running fresh login',
+    );
     const fresh = await runFreshLogin(browser, options);
     await fresh.context.storageState({ path: options.instance.storageStatePath });
+    options.logger?.info(
+      {
+        instanceId: options.instance.instanceId,
+        requiredSecondLogin: fresh.requiredSecondLogin,
+        durationMs: Date.now() - startedAt,
+      },
+      'STARFACE login flow completed with fresh login',
+    );
 
     return {
       browser,
@@ -255,6 +321,14 @@ export const loginToStarface = async (options: LoginToStarfaceOptions): Promise<
       storageStatePath: options.instance.storageStatePath,
     };
   } catch (error) {
+    options.logger?.error(
+      {
+        instanceId: options.instance.instanceId,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+      },
+      'STARFACE login flow failed',
+    );
     await browser.close().catch(() => undefined);
     throw error;
   }

@@ -242,7 +242,24 @@ export interface ScrapeModulesOptions {
 }
 
 export const scrapeModules = async ({ page, instance, logger }: ScrapeModulesOptions): Promise<NormalizedModulesPayload> => {
+  const startedAt = Date.now();
+  logger?.info(
+    {
+      instanceId: instance.instanceId,
+      baseUrl: instance.baseUrl,
+      selectorVersion,
+    },
+    'Scraper pipeline started',
+  );
+
   const overviewUrl = await navigateToOverview(page, instance.baseUrl);
+  logger?.info(
+    {
+      instanceId: instance.instanceId,
+      overviewUrl,
+    },
+    'Modules overview opened',
+  );
   await checkModulesOverview(page);
 
   const rawModules = await extractModulesOnPage(page);
@@ -254,6 +271,13 @@ export const scrapeModules = async ({ page, instance, logger }: ScrapeModulesOpt
       { selectorVersion },
     );
   }
+  logger?.info(
+    {
+      instanceId: instance.instanceId,
+      modulesDetected: rawModules.length,
+    },
+    'Modules extracted from overview',
+  );
 
   for (const rawModule of rawModules) {
     if (rawModule.rawRules.length > 0 || !rawModule.detailUrl) {
@@ -277,6 +301,16 @@ export const scrapeModules = async ({ page, instance, logger }: ScrapeModulesOpt
     }
   }
 
-  return normalizeRawModules(instance, rawModules);
+  const normalized = normalizeRawModules(instance, rawModules);
+  logger?.info(
+    {
+      instanceId: instance.instanceId,
+      modulesCount: normalized.modules.length,
+      warningsCount: normalized.warnings.length,
+      durationMs: Date.now() - startedAt,
+    },
+    'Scraper pipeline finished',
+  );
+  return normalized;
 };
 

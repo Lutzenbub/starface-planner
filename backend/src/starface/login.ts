@@ -103,7 +103,18 @@ const submitLoginForm = async (
 
 const waitForDashboard = async (page: Page, timeoutMs: number): Promise<void> => {
   try {
-    await page.waitForSelector(selectorMap.dashboard.adminButton, { timeout: timeoutMs, state: 'visible' });
+    await page.waitForFunction(
+      () => {
+        const element = document.querySelector('td#config');
+        if (!element) {
+          return false;
+        }
+        const text = element.textContent?.trim().toLowerCase() ?? '';
+        return text.includes('administration');
+      },
+      undefined,
+      { timeout: timeoutMs },
+    );
   } catch {
     if (await hasLoginError(page)) {
       throw new AppError('LOGIN_FAILED', 'Login fehlgeschlagen: STARFACE hat die Anmeldung abgelehnt', 401);
@@ -118,20 +129,29 @@ const waitForDashboard = async (page: Page, timeoutMs: number): Promise<void> =>
 };
 
 const clickAdministration = async (page: Page, timeoutMs: number): Promise<void> => {
-  const adminButton = page.locator(selectorMap.dashboard.adminButton).first();
+  const adminButton = page
+    .locator(selectorMap.dashboard.adminButton, {
+      hasText: /Administration/i,
+    })
+    .first();
+
+  const fallbackAdminButton = page.locator(selectorMap.dashboard.adminButton).first();
+
   if ((await adminButton.count()) === 0) {
-    throw new AppError(
-      'ADMIN_BUTTON_NOT_FOUND',
-      'STARFACE Frontend Struktur hat sich geaendert oder Login war nicht erfolgreich',
-      502,
-      { expectedSelector: selectorMap.dashboard.adminButton },
-    );
+    if ((await fallbackAdminButton.count()) === 0) {
+      throw new AppError(
+        'ADMIN_BUTTON_NOT_FOUND',
+        'STARFACE Frontend Struktur hat sich geaendert oder Login war nicht erfolgreich',
+        502,
+        { expectedSelector: selectorMap.dashboard.adminButton },
+      );
+    }
   }
 
   try {
     await Promise.all([
       page.waitForURL('**/config/display.do**', { timeout: timeoutMs }),
-      adminButton.click(),
+      (await adminButton.count()) > 0 ? adminButton.click() : fallbackAdminButton.click(),
     ]);
   } catch {
     throw new AppError(

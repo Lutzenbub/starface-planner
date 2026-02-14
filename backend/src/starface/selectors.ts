@@ -2,6 +2,10 @@ export const selectorMap = {
   version: 'starface-cloud-v2026-02-13',
   login: {
     username: [
+      'input[name="id"]',
+      'input#id',
+      'input[placeholder="ID"]',
+      'input[placeholder*="id" i]',
       'input[name="username"]',
       'input#username',
       'input[type="text"][name*="user" i]',
@@ -18,6 +22,7 @@ export const selectorMap = {
   },
   dashboard: {
     adminButton: 'td#config',
+    adminButtonFallback: ['td#config', 'td.caption-cursor:has-text("Administration")'],
   },
   admin: {
     entryUrlPattern: '/config/display.do',

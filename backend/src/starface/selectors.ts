@@ -1,5 +1,17 @@
 export const selectorMap = {
-  version: 'starface-cloud-v2026-02-13',
+  version: 'starface-cloud-v10-2026-02-14',
+  entry: {
+    adminChoice: [
+      'a:has-text("Als Administrator anmelden")',
+      'button:has-text("Als Administrator anmelden")',
+      'a:has-text("Administrator")',
+      'button:has-text("Administrator")',
+    ],
+  },
+  oauth: {
+    realmUrlPattern: '/auth/realms/pbx',
+    uiUrlPattern: '/?ui',
+  },
   login: {
     username: [
       'input[name="id"]',

@@ -1,0 +1,18 @@
+# Git
+.git
+.gitignore
+.github
+
+# Node
+node_modules
+npm-debug.log*
+
+# Local artifacts
+backend/.auth
+backend/DEBUG
+backend/data/instances
+frontend/dist
+
+# Unused for backend image
+frontend
+src

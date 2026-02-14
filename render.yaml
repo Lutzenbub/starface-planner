@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: starface-planner-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: STARFACE_ALLOWED_ORIGINS
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: PLAYWRIGHT_HEADLESS
+        value: "true"
+      - key: STARFACE_SYNC_TIMEOUT_MS
+        value: "120000"
+      - key: STARFACE_REQUEST_TIMEOUT_MS
+        value: "45000"

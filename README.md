@@ -104,3 +104,31 @@ Fehlercodes:
 - Credentials liegen nur im Backend-RAM.
 - Session-Reuse erfolgt optional ueber `backend/.auth/*.json` (`.gitignore` ausgeschlossen).
 - Logs sind strukturiert und redacted (Passwort/Cookies/Auth-Header).
+
+## Deployment (GitHub Pages + Render)
+
+### 1. Backend auf Render deployen
+
+Dieses Repo enthält `render.yaml` und `backend/Dockerfile`.
+
+- In Render: **New +** -> **Blueprint**
+- Repository `Lutzenbub/starface-planner` auswählen
+- Service `starface-planner-backend` erstellen
+- Wichtiges Env in Render setzen:
+  - `STARFACE_ALLOWED_ORIGINS=https://lutzenbub.github.io`
+  - optional `DEBUG=true` fuer Diagnose-Screenshots
+
+Nach Deploy sollte `https://<dein-render-service>/api/health` `ok: true` liefern.
+
+### 2. Frontend auf GitHub Pages mit Backend verbinden
+
+In GitHub Repository:
+- **Settings** -> **Secrets and variables** -> **Actions** -> **Variables**
+- Variable setzen:
+  - `VITE_API_BASE_URL=https://<dein-render-service>`
+
+Dann Workflow **Deploy Frontend** erneut ausführen (oder Push auf `main`).
+
+### 3. Ergebnis
+
+`https://lutzenbub.github.io/starface-planner/` ruft dann nicht mehr `/api/*` auf GitHub Pages auf, sondern dein Render-Backend.

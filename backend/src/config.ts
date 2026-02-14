@@ -50,8 +50,9 @@ export interface AppConfig {
 
 export const resolveConfig = (): AppConfig => {
   const dataRoot = path.join(backendRoot, 'data');
+  const runtimePort = process.env.STARFACE_BACKEND_PORT ?? process.env.PORT;
   return {
-    port: parseNumber(process.env.STARFACE_BACKEND_PORT, 55123),
+    port: parseNumber(runtimePort, 55123),
     logLevel: process.env.LOG_LEVEL ?? 'info',
     debug: parseBoolean(process.env.DEBUG, false),
     debugDir: process.env.DEBUG_DIR ?? path.join(backendRoot, 'DEBUG'),
